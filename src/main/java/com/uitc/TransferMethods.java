@@ -126,7 +126,7 @@ public class TransferMethods {
         //欄位名稱
         correctHeader.add(Arrays.asList("報表代號", "總份數"));
         needUpdatedHeader.add(Arrays.asList("報表代號", "總份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔", "最後需補檔日期", "有問題報表檔名", "需校正檔案部分名稱"));
-        failureHeader.add(Arrays.asList("報表代號", "總份數", "備註"));
+        failureHeader.add(Arrays.asList("報表代號", "總份數", "與 2024年差異", "備註"));
 
         try{
             createCWaveXlsxFile(
@@ -173,62 +173,14 @@ public class TransferMethods {
 
         CellStyle contentStyle = createContentAndStyleForExcel(workbook, fontName);
 
-        //設定內容
-        List<String> correctMapKeys = new ArrayList<>(correctMap.keySet());
-        Collections.sort(correctMapKeys);
-
         //將 data 寫入 Excel (Sheet : 完全正確)
-        for (int i = 0; i < correctMapKeys.size(); i++) {
+        writeMapToSheet(correctSheet, correctMap, contentStyle, true);
 
-            String key = correctMapKeys.get(i);
-
-            int value = correctMap.get(key);
-
-            // 建立第二列 (Row)
-            Row row = correctSheet.createRow(i + 1);
-            createCell(row, 0, key, contentStyle);
-            createCell(row, 1, value, contentStyle);
-        }
-
-        //設定內容
-        List<String> needUpdatedMapKeys = new ArrayList<>(needUpdatedMap.keySet());
-        Collections.sort(needUpdatedMapKeys);
-
-        //將 data 寫入 Excel
-        for (int i = 0; i < needUpdatedMapKeys.size(); i++) {
-
-            String key = needUpdatedMapKeys.get(i);
-
-            List<Object> values = needUpdatedMap.get(key);
-
-            // 建立第二列 (Row)
-            Row row = updatedSheet.createRow(i + 1);
-            createCell(row, 0, key, contentStyle);
-
-            for(int j = 0; j < values.size(); j++){
-                createCell(row, (j + 1), values.get(j), contentStyle);
-            }
-        }
-
-        //設定內容
-        List<String> failureMapKeys = new ArrayList<>(failureMap.keySet());
-        Collections.sort(failureMapKeys);
+        //將 data 寫入 Excel (Sheet : 需校正及補檔)
+        writeMapToSheet(updatedSheet, needUpdatedMap, contentStyle, true);
 
         //將 data 寫入 Excel (Sheet : 需全部重新下載)
-        for (int i = 0; i < failureMapKeys.size(); i++) {
-
-            String key = failureMapKeys.get(i);
-
-            List<Object> values = failureMap.get(key);
-
-            // 建立第二列 (Row)
-            Row row = failureSheet.createRow(i + 1);
-            createCell(row, 0, key, contentStyle);
-
-            for(int j = 0; j < values.size(); j++){
-                createCell(row, (j + 1), values.get(j), contentStyle);
-            }
-        }
+        writeMapToSheet(failureSheet, failureMap, contentStyle, false);
 
         //寫出檔案
         FileOutputStream fileOut = new FileOutputStream(exportPath + "/" + excelExportPartName + "_Result_" + generateTime + ".xlsx");
@@ -396,6 +348,31 @@ public class TransferMethods {
         cell.setCellStyle(style);
     }
 
+    private static void writeMapToSheet(SXSSFSheet sheet, Map<String, ?> dataMap, CellStyle contentStyle, boolean needSorted) {
+        List<String> keys = new ArrayList<>(dataMap.keySet());
+        if(needSorted) {
+            Collections.sort(keys);
+        }
+
+        for(int i = 0; i < keys.size(); i++) {
+            String key = keys.get(i);
+            Row row = sheet.createRow(i + 1);
+            createCell(row, 0, key, contentStyle);
+
+            Object value = dataMap.get(key);
+
+            if(value instanceof List<?>) {
+                List<?> list = (List<?>) value;
+                for(int j = 0; j < list.size(); j++) {
+                    createCell(row, j + 1, list.get(j), contentStyle);
+                }
+            } else {
+                createCell(row, 1, value, contentStyle);
+            }
+
+        }
+    }
+
     /**
      * 檢查檔案名稱是否以 ".xlsx" 或 ".xls" 結尾 (符合 Excel 檔的副檔名)，及過濾掉檔名開頭是 ._ 或 ~$。
      * @param file：所有讀取到的檔案。
@@ -421,9 +398,9 @@ public class TransferMethods {
      */
     public static boolean isValidFile(File file) {
         //檢查檔案名稱的副檔名是否為 ".txt" 或 ".TXT"。
-//        if (!(file.getName().endsWith(".txt") || file.getName().endsWith(".TXT"))) {
-//            return false;
-//        }
+        if (!(file.getName().endsWith(".txt") || file.getName().endsWith(".TXT"))) {
+            return false;
+        }
 
         // 檢查檔案名稱是否以 "._" 或 "~$" 或 ".DS"開頭。
         if (file.getName().startsWith("._") || file.getName().startsWith("~$") || file.getName().startsWith(".DS")) {
