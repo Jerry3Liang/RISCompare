@@ -1,18 +1,18 @@
 package com.uitc;
 
 public class ParamsContent {
-    private String dataBase2024ExcelPath;
+    private String yearExcelPath;
     private String searchFolderPathURI;
     private String reportInYear;
     private String updatedFileFolderPathURI;
     private String compareResultExportPath;
 
-    public String getDataBase2024ExcelPath() {
-        return dataBase2024ExcelPath;
+    public String getYearExcelPath() {
+        return yearExcelPath;
     }
 
-    public void setDataBase2024ExcelPath(String dataBase2024ExcelPath) {
-        this.dataBase2024ExcelPath = dataBase2024ExcelPath;
+    public void setYearExcelPath(String yearExcelPath) {
+        this.yearExcelPath = yearExcelPath;
     }
 
     public String getSearchFolderPathURI() {

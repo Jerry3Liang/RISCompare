@@ -1,394 +1,225 @@
 package com.uitc;
 
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.streaming.SXSSFSheet;
-import org.apache.poi.xssf.streaming.SXSSFWorkbook;
-import org.apache.poi.xssf.usermodel.XSSFColor;
-import org.apache.poi.xssf.usermodel.XSSFFont;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class TransferMethods {
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
-    public static ParamsContent getParamsContent(String paramsFilePath) {
-
-        ParamsContent paramsContent = new ParamsContent();
-        File file = new File(paramsFilePath);
-        if(file.isFile() && isValidExcelFile(file)) {
-            String filePathString = file.getAbsolutePath();
-            System.out.println("讀取到的參數檔：" + file.getName());
-            try (FileInputStream fileInputStream = new FileInputStream(filePathString)) {
-                Workbook workbook = WorkbookFactory.create(fileInputStream);
-                Sheet sheet = workbook.getSheetAt(0);
-
-                Integer db2024ExcelFilePathPositionRowIndex = findRowIndexByCellValue(sheet, "DB 2024 Excel Path", 0);
-                paramsContent.setDataBase2024ExcelPath(findValueByRowIndex(sheet, db2024ExcelFilePathPositionRowIndex));
-
-                Integer folderPathPositionRowIndex = findRowIndexByCellValue(sheet, "Search Folder Path", 0);
-                paramsContent.setSearchFolderPathURI(findValueByRowIndex(sheet, folderPathPositionRowIndex));
-
-                Integer reportInYearRowIndex = findRowIndexByCellValue(sheet, "Report In Year", 0);
-                paramsContent.setReportInYear(findValueByRowIndex(sheet, reportInYearRowIndex));
-
-                Integer updatedFileFolderPathPositionRowIndex = findRowIndexByCellValue(sheet, "Updated File Folder Path", 0);
-                paramsContent.setUpdatedFileFolderPathURI(findValueByRowIndex(sheet, updatedFileFolderPathPositionRowIndex));
-
-                Integer compareResultExportPathRowIndex = findRowIndexByCellValue(sheet, "Compare Result Export Path", 0);
-                paramsContent.setCompareResultExportPath(findValueByRowIndex(sheet, compareResultExportPathRowIndex));
-
-                workbook.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-
-        return paramsContent;
-    }
-
-    public static Map<String, Double> get2024ReportCounts(String db2024ExcelPath) {
-
-        Map<String, Double> reportNameVSCount = new HashMap<>();
-        File file = new File(db2024ExcelPath);
-        if(file.isFile() && isValidExcelFile(file)) {
-            String filePathString = file.getAbsolutePath();
-            try (FileInputStream fileInputStream = new FileInputStream(filePathString)) {
-                Workbook workbook = WorkbookFactory.create(fileInputStream);
-                Sheet sheet = workbook.getSheetAt(0);
-                double total = 0.0;
-                for(int rowIndex = 1; rowIndex < sheet.getPhysicalNumberOfRows(); rowIndex++) {
-                    Row row = sheet.getRow(rowIndex);
-                    Cell reportIdCell = row.getCell(0);
-                    Cell totalCountCell = row.getCell(1);
-                    String reportId =  getStringCellValue(reportIdCell);
-                    if (totalCountCell != null && totalCountCell.getCellType() == CellType.NUMERIC) {
-                        total = totalCountCell.getNumericCellValue();
-                    }
-                    reportNameVSCount.put(reportId, total);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-
-        return reportNameVSCount;
-    }
-
-    //參數檔用
-    private static Integer findRowIndexByCellValue(Sheet sheet, String keyWord, Integer columnIndex) {
-
-        for (Row row : sheet) {
-            if (row == null) continue;
-            Cell cell = row.getCell(columnIndex);
-            if (cell != null && cell.getCellType() == CellType.STRING) {
-                String cellValue = cell.getStringCellValue();
-                if (cellValue.contains(keyWord)) {
-                    return row.getRowNum(); // 返回匹配關鍵字的 row index
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static String findValueByRowIndex(Sheet sheet, Integer rowIndex) {
-
-        Row row = sheet.getRow(rowIndex);
-        Cell valueCell = row.getCell(1);
-
-        if(valueCell.getCellType() == CellType.STRING) {
-            return getStringCellValue(valueCell);
-        } else if(valueCell.getCellType() == CellType.NUMERIC) {
-            return getNumericCellValue(valueCell);
-        }
-
-        return null;
-    }
-
-    public static Boolean exportXlsx(
-            String exportPath,
-            Map<String, Integer> correctMap,
-            Map<String, List<Object>> needUpdatedMap,
-            Map<String, List<Object>> failureMap,
-            String excelExportPartName
+    public static List<Object> getNeedUpdatedColumnList(
+            File reportFolder,
+            File[] reportFolderFiles,
+            String searchYear,
+            int filesCount,
+            Set<String> dateSet,
+            String updatedFileFolderPath,
+            String reportFolderName,
+            boolean isEnglishReport
     ) {
-        //產生當前時間 yyyy年MM月dd日
-        String generateTime = DatetimeConverter.getSYSTime(4);
+        List<Object> needUpdatedColumnList = new ArrayList<>();
 
-        //設定Excel表頭
-        List<List<String>> correctHeader = new ArrayList<>();
-        List<List<String>> needUpdatedHeader = new ArrayList<>();
-        List<List<String>> failureHeader = new ArrayList<>();
+        int originalCorrectCount = 0;
+        int needUpdate = 0;
+        int updatedCorrectCount;
+        int failureCount = 0;
 
-        //欄位名稱
-        correctHeader.add(Arrays.asList("報表代號", "總份數"));
-        needUpdatedHeader.add(Arrays.asList("報表代號", "總份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔", "最後需補檔日期", "有問題報表檔名", "需校正檔案部分名稱"));
-        failureHeader.add(Arrays.asList("報表代號", "總份數", "與 2024年差異", "備註"));
+        //建立錯誤報表檔案名稱 List
+        List<String> failureFileName = new ArrayList<>();
+        //建立日期原本就正確 Set
+        Set<String> originalCorrectDate = new HashSet<>();
+        //建立需校正名單
+        Set<String> needUpdateDate = new HashSet<>();
+        //建立校正完名稱 Set，儲存改完名的日期
+        Set<String> UpdatedDate = new HashSet<>();
 
-        try{
-            createCWaveXlsxFile(
-                    exportPath,
-                    correctHeader, needUpdatedHeader, failureHeader,
-                    correctMap, needUpdatedMap, failureMap,
-                    generateTime,
-                    "Times New Roman",
-                    excelExportPartName
-            );
+        //計算讀取報表內容行數
+        int countLine = 0;
 
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
+        //遍歷報表代號的資料夾裡所有檔案
+        for (File reportFile : reportFolderFiles) {
+            if(isValidFile(reportFile)) {
+                String reportFileName = reportFile.getName();
+                String reportFileNameYear = reportFileName.substring(reportFileName.lastIndexOf("_") + 1, reportFileName.lastIndexOf("_") + 5);
+                if(Objects.equals(searchYear, reportFileNameYear)) {
+                    String reportFileNameDate = reportFileName.substring(reportFileName.indexOf("_") + 1, reportFileName.lastIndexOf("_") + 9);
 
-    private static void createCWaveXlsxFile(
-            String exportPath,
-            List<List<String>> correctHeader,
-            List<List<String>> needUpdatedHeader,
-            List<List<String>> failureHeader,
-            Map<String, Integer> correctMap,
-            Map<String, List<Object>> needUpdatedMap,
-            Map<String, List<Object>> failureMap,
-            String generateTime,
-            String fontName,
-            String excelExportPartName
-    ) throws IOException {
-        SXSSFWorkbook workbook = new SXSSFWorkbook(100);
-        SXSSFSheet correctSheet = workbook.createSheet("完全正確");
-        SXSSFSheet updatedSheet = workbook.createSheet("需校正及補檔");
-        SXSSFSheet failureSheet = workbook.createSheet("需全部重新下載");
+                    //Windows 電腦，檔案如果為空白，容量為 0
+                    if(reportFile.length() == 0) {
+                        failureCount++;
+                        failureFileName.add(reportFileName);
+                        logger.debug("E-2-1. 檔案名稱 : {} 為空白報表", reportFileName);
+                        continue;
+                    }
 
-        Map<Integer, Double> columnWidthMultiplier = new HashMap<>();
-        columnWidthMultiplier.put(0, 1.3);
-        columnWidthMultiplier.put(1, 1.3);
-        columnWidthMultiplier.put(2, 1.3);
-        columnWidthMultiplier.put(3, 1.3);// 第 3 列用 2.5 倍
+                    logger.info("E-2-1. 檔案名稱： {}", reportFileName);
+                    System.out.println("檔案名稱 : " + reportFileName);
+                    //開始讀取報表
+                    try(BufferedReader br = new BufferedReader(new FileReader(reportFile))) {
+                        String line;
+                        countLine = 0;
 
-        createHeaderAndStyleForExcel(correctHeader, workbook, correctSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(needUpdatedHeader, workbook, updatedSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(failureHeader, workbook, failureSheet, fontName, columnWidthMultiplier);
+                        //只讀取報表前 15行
+                        for(int i = 0; i < 15; i++) {
+                            countLine++;
+                            line = br.readLine();
+                            if(line == null) {
+                                logger.info("E-2-2. 檔案 {} 第 {}行之後為空，請檢查檔案", reportFileName, i + 1);
+                                break;
+                            }
+                            //                        System.out.println("字串長度 ： " + line.length());
+                            //                        for (int j = 0; j < line.length(); j++) {
+                            //                            char c = line.charAt(j);
+                            //                            System.out.println("字元: '" + c + "' Unicode: " + (int)c);
+                            //                        }
 
-        CellStyle contentStyle = createContentAndStyleForExcel(workbook, fontName);
+                            //讀取到的行有 "日期："
+                            if(line.contains("日期：")){
+                                int startIndex = line.indexOf("日期：");
+                                //Mac 用
+//                                String dateString = line.substring(startIndex + 3, startIndex + 13).replace("/", "");
+                                //Windows 用
+                                String dateString = line.substring(startIndex + 4, startIndex + 14).replace("/", "");
 
-        //將 data 寫入 Excel (Sheet : 完全正確)
-        writeMapToSheet(correctSheet, correctMap, contentStyle, true);
+                                String fileNameDate = reportFileName.substring(reportFileName.lastIndexOf("_") + 1, reportFileName.lastIndexOf("_") + 9);
+                                System.out.println("內文日期 : " + dateString);
+                                System.out.println("檔案名稱的日期 : " + fileNameDate);
+                                logger.info("E-2-2. 內文日期： {}", dateString);
+                                logger.info("E-2-3. 檔案名稱的日期： {}", fileNameDate);
 
-        //將 data 寫入 Excel (Sheet : 需校正及補檔)
-        writeMapToSheet(updatedSheet, needUpdatedMap, contentStyle, true);
+                                //最後所有正確檔案位置
+                                File updatedReportFolder = new File(updatedFileFolderPath + "/" + reportFolderName);
+                                //原檔案 Path
+                                Path sourcePath = reportFile.toPath();
+                                //檔案複製到目標資料夾的 Path
+                                String newFileName = reportFileName.substring(0, reportFileName.lastIndexOf("_") + 1) + dateString + ".txt";
+                                Path targetPath = updatedReportFolder.toPath().resolve(newFileName);
+                                if(!updatedReportFolder.exists()) {
+                                    if(updatedReportFolder.mkdirs()) {
+                                        logger.info("E-3-1. 建立報表資料夾： {}", reportFolder);
+                                    } else {
+                                        logger.info("E-3-2. 建立資料夾: {} 失敗！", updatedReportFolder);
+                                    }
+                                } else {
+                                    logger.info("E-3-3. 報表資料夾： {} 已存在！", reportFolder);
+                                }
 
-        //將 data 寫入 Excel (Sheet : 需全部重新下載)
-        writeMapToSheet(failureSheet, failureMap, contentStyle, false);
+                                boolean isDateMatch = Objects.equals(dateString, fileNameDate);
 
-        //寫出檔案
-        FileOutputStream fileOut = new FileOutputStream(exportPath + "/" + excelExportPartName + "_Result_" + generateTime + ".xlsx");
-        workbook.write(fileOut);
-        workbook.close();
-        fileOut.close();
-    }
+                                String updatedPartReportNameDate = reportFileName.substring(reportFileName.indexOf("_") + 1, reportFileName.indexOf("_") + 3) + dateString;
 
-    /**
-     * 所有 Excel 表頭部分的通用樣式
-     * @param header: 表頭內容陣列
-     * @param workbook: .xlsx 的 Excel
-     * @param sheet: Excel 的內頁
-     * @param columnWidthMultiplier: 動態設定列寬的索引與倍數
-     */
-    private static void createHeaderAndStyleForExcel(
-            List<List<String>> header,
-            SXSSFWorkbook workbook,
-            SXSSFSheet sheet,
-            String fontName,
-            Map<Integer, Double> columnWidthMultiplier //動態設定列寬的索引與倍數
-    ){
-        //設定自適應列寬
-        sheet.trackAllColumnsForAutoSizing();
+                                if(!isDateMatch) {
+                                    needUpdate++;
+                                    System.out.println("日期不符合!!!");
+                                    logger.info("E-4. 日期不符合!!!");
+                                    needUpdateDate.add(reportFileNameDate);
+                                    UpdatedDate.add(updatedPartReportNameDate);
+                                } else {
+                                    logger.info("E-4. 日期符合!!!");
+                                    originalCorrectCount++;
+                                    originalCorrectDate.add(reportFileNameDate);
+                                }
 
-        byte[] rgb = new byte[] {
-                (byte) 255,
-                (byte) 255,
-                (byte) 255 };
+                                String logMessage = isDateMatch ? "E-5-1. 報表： {} 以複製到指定資料夾！" : "E-5-1. 檔名校正後報表： {} 以複製到指定資料夾！";
 
-        Font font = workbook.createFont();
-        font.setFontName(fontName);
+                                try {
+                                    Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                                    dateSet.remove(isDateMatch ? reportFileNameDate : updatedPartReportNameDate);
+                                    logger.info(logMessage, targetPath);
+                                } catch(IOException e) {
+                                    logger.error("E-5-2. 複製檔案失敗：來源={}，目標={}", sourcePath, targetPath, e);
+                                }
 
-        XSSFFont headerFont = (XSSFFont) workbook.createFont();
-        headerFont.setColor(new XSSFColor(rgb, null));
-        headerFont.setFontName(fontName);
-        headerFont.setFontHeightInPoints((short) 14);
-        headerFont.setBold(true);
-
-        CellStyle headerStyle = workbook.createCellStyle();
-        headerStyle.setBorderBottom(BorderStyle.MEDIUM);
-        headerStyle.setBorderTop(BorderStyle.MEDIUM);
-        headerStyle.setBorderRight(BorderStyle.MEDIUM);
-        headerStyle.setBorderLeft(BorderStyle.MEDIUM);
-        headerStyle.setAlignment(HorizontalAlignment.CENTER);
-        headerStyle.setVerticalAlignment(VerticalAlignment.CENTER);
-        headerStyle.setFont(headerFont);
-
-        //背景顏色
-        headerStyle.setFillForegroundColor(IndexedColors.GREEN.getIndex());
-        headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-
-        //設定表頭
-        for (int i = 0; i < header.size(); i++) {
-            Row row = sheet.createRow(i);
-
-            for (int j = 0; j < header.get(i).size(); j++) {
-                Cell cell = row.createCell(j);
-                cell.setCellStyle(headerStyle);
-                cell.setCellValue(header.get(i).get(j)==null ? "" : header.get(i).get(j));
-                //設定自適應列寬
-                sheet.autoSizeColumn(j);
-
-                //檢查是否有特定列需要使用倍數調整寬度
-                if (columnWidthMultiplier.containsKey(j)) {
-                    double multiplier = columnWidthMultiplier.get(j);
-                    sheet.setColumnWidth(j, (int) (sheet.getColumnWidth(j) * multiplier));
-                } else {
-                    sheet.setColumnWidth(j, (sheet.getColumnWidth(j) * 12 / 10));
-                }
-            }
-        }
-    }
-
-    /**
-     * 所有 Excel 內容部分的通用樣式
-     * @param workbook: .xlsx 的 Excel
-     * @return : CellStyle
-     */
-    private static CellStyle createContentAndStyleForExcel(SXSSFWorkbook workbook, String fontName){
-
-        CellStyle contentStyle = workbook.createCellStyle();
-        contentStyle.setAlignment(HorizontalAlignment.CENTER);
-        contentStyle.setVerticalAlignment(VerticalAlignment.CENTER);
-
-        Font contentFont = workbook.createFont();
-        contentFont.setFontName(fontName);
-        contentFont.setFontHeightInPoints((short) 12);
-        contentStyle.setFont(contentFont);
-
-        return contentStyle;
-    }
-
-    /**
-     * 獲得讀取到的儲存格值。
-     * @param cell: 所讀取的 Excel 檔裡的儲存格。
-     * @return : 讀取的儲存格如為 String 資料型態就傳回該值，若不為 String 資料型態則傳回 null。
-     */
-    private static String getStringCellValue(Cell cell) {
-
-        if (cell != null) {
-            if (cell.getCellType() == CellType.STRING) {
-
-                return cell.getStringCellValue().trim();
-            }
-        }
-
-        return null; //Return Null for non-string cells or errors
-    }
-
-    /**
-     * 獲得讀取到的儲存格值。
-     * @param cell: 所讀取的 Excel 檔裡的儲存格。
-     * @return : 讀取的儲存格如為 double 資料型態就傳回該值，若不為 double 資料型態則傳回 0.0。
-     */
-    private static String getNumericCellValue(Cell cell) {
-        if (cell != null && cell.getCellType() == CellType.NUMERIC) {
-            double numericValue = cell.getNumericCellValue();
-            //檢查是否為整數
-            if (numericValue == Math.floor(numericValue)) {
-                return String.valueOf((long) numericValue);
-            } else {
-                return String.valueOf(numericValue);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * 設置 Excel 儲存格的通用方法
-     * @param row: 已創建好的 row
-     * @param columnIndex: 欲寫入 Excel 的 Column 索引
-     * @param value: 欲寫入 Excel 的值
-     * @param style: 欲使用的樣式
-     */
-    private static void createCell(Row row, int columnIndex, Object value, CellStyle style) {
-
-        Cell cell = row.createCell(columnIndex);
-        if(value instanceof String) {
-            cell.setCellValue((String) value);
-        } else if(value instanceof Double) {
-            cell.setCellValue((Double) value);
-        } else if(value instanceof Integer) {
-            cell.setCellValue((Integer) value);
-        } else if(value instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<Object> list = (List<Object>) value;
-            String joined = list.stream()
-                    .map(String::valueOf)//確保轉成字串
-                    .reduce((a, b) -> a + ", " + b)  // 用逗號串接
-                    .orElse("");
-            cell.setCellValue(joined);
-        } else if (value instanceof Set) {
-            //假設 Set 裡的元素型別不固定，全部轉字串
-            @SuppressWarnings("unchecked")
-            Set<Object> set = (Set<Object>) value;
-            String joined = set.stream()
-                    .map(String::valueOf)
-                    .reduce((a, b) -> a + ", " + b)
-                    .orElse("");
-            cell.setCellValue(joined);
-        }
-
-        cell.setCellStyle(style);
-    }
-
-    private static void writeMapToSheet(SXSSFSheet sheet, Map<String, ?> dataMap, CellStyle contentStyle, boolean needSorted) {
-        List<String> keys = new ArrayList<>(dataMap.keySet());
-        if(needSorted) {
-            Collections.sort(keys);
-        }
-
-        for(int i = 0; i < keys.size(); i++) {
-            String key = keys.get(i);
-            Row row = sheet.createRow(i + 1);
-            createCell(row, 0, key, contentStyle);
-
-            Object value = dataMap.get(key);
-
-            if(value instanceof List<?>) {
-                List<?> list = (List<?>) value;
-                for(int j = 0; j < list.size(); j++) {
-                    createCell(row, j + 1, list.get(j), contentStyle);
+                                //有找到 "日期："，不需繼續讀完 15行
+                                break;
+                            }
+                        }
+                    } catch (IOException e) {
+                        System.out.println("報表有問題");
+                    }
                 }
             } else {
-                createCell(row, 1, value, contentStyle);
+                logger.info("E-2-1. 檔案： {}，不是 .txt 檔", reportFile.getName());
             }
 
+            if(countLine >= 15) {
+                System.out.println("讀取 " + countLine + "行後未找到關鍵字，可能為英文報表");
+                logger.info("E-2-1. 讀取第 1個檔案  {} 行後未找到關鍵字，可能為英文報表！", countLine);
+                isEnglishReport = true;
+                //只讀 1個檔案
+                break;
+            }
         }
+
+        //為了不更動到原本的 UpdatedDate，用另一個 Set 變數
+        Set<String> updatedCorrect;
+        updatedCorrect = UpdatedDate;
+        updatedCorrect.removeAll(originalCorrectDate);
+        updatedCorrectCount =  updatedCorrect.size();
+
+        //最後需下載日期 (去掉開頭 "數字_" )，並照日期從小到大排序
+        Set<String> sortedDates = dateSet.stream()
+                .map(s -> s.substring(s.indexOf("_") + 1)) // 取 "_" 後面的字串
+                .collect(Collectors.toCollection(TreeSet::new)); // TreeSet 自動排序
+
+        Set<String> dateSetSorted = new TreeSet<>(needUpdateDate);
+
+        needUpdatedColumnList.add(filesCount);
+        needUpdatedColumnList.add(originalCorrectCount);
+        needUpdatedColumnList.add(needUpdate);
+        needUpdatedColumnList.add(failureCount);
+        needUpdatedColumnList.add(updatedCorrectCount);
+        needUpdatedColumnList.add(sortedDates.size());
+        needUpdatedColumnList.add(sortedDates);
+
+        if(failureFileName.isEmpty()) {
+            needUpdatedColumnList.add("無");
+        } else {
+            needUpdatedColumnList.add(failureFileName);
+        }
+
+        needUpdatedColumnList.add(dateSetSorted);
+
+        return needUpdatedColumnList;
     }
 
-    /**
-     * 檢查檔案名稱是否以 ".xlsx" 或 ".xls" 結尾 (符合 Excel 檔的副檔名)，及過濾掉檔名開頭是 ._ 或 ~$。
-     * @param file：所有讀取到的檔案。
-     * @return boolean: true (是 Excel 檔) 或 false (不是 Excel 檔)。
-     */
-    public static boolean isValidExcelFile(File file) {
-        //檢查檔案名稱的副檔名是否為 ".xlsx" 或 ".xls"。
-        if (!(file.getName().endsWith(".xlsx") || file.getName().endsWith(".xls"))) {
-            return false;
+    public static List<String> getFileNameList(File[] reportFolderFiles, String searchYear){
+        List<String> fileNameList = new ArrayList<>();
+
+        //先遍歷所有檔案名稱，日期年的位置與要比對的年份一致就存入 fileNameList
+        for(File reportFile : reportFolderFiles) {
+            String reportFileName = reportFile.getName();
+            String reportFileNameDate = reportFileName.substring(reportFileName.indexOf("_") + 1, reportFileName.lastIndexOf("_") + 9);
+            String reportFileNameYear = reportFileNameDate.substring(reportFileNameDate.indexOf("_") + 1, reportFileNameDate.indexOf("_") + 5);
+            if(Objects.equals(searchYear, reportFileNameYear)) {
+                fileNameList.add(reportFileNameDate);
+            }
         }
 
-        // 檢查檔案名稱是否以 "._" 或 "~$" 開頭。
-        if (file.getName().startsWith("._") || file.getName().startsWith("~$")) {
-            return false;
+        return fileNameList;
+    }
+
+    public static Set<String> getDateSet(File[] reportFolderFiles, String searchYear) {
+        //建立全部檔案名稱日期 Set
+        Set<String> dateSet = new HashSet<>();
+
+        //遍歷報表代號的資料夾裡所有檔案並將檔案名稱的日期存取到 dateSet
+        for(File reportFile : reportFolderFiles) {
+            String reportFileName = reportFile.getName();
+            String reportFileNameYear = reportFileName.substring(reportFileName.lastIndexOf("_") + 1, reportFileName.lastIndexOf("_") + 5);
+            if(Objects.equals(searchYear, reportFileNameYear)) {
+                String fileNameDate = reportFileName.substring(reportFileName.indexOf("_") + 1, reportFileName.lastIndexOf("_") + 9);
+                dateSet.add(fileNameDate);
+            }
         }
-        return true;
+
+        return dateSet;
     }
 
     /**
@@ -403,9 +234,6 @@ public class TransferMethods {
         }
 
         // 檢查檔案名稱是否以 "._" 或 "~$" 或 ".DS"開頭。
-        if (file.getName().startsWith("._") || file.getName().startsWith("~$") || file.getName().startsWith(".DS")) {
-            return false;
-        }
-        return true;
+        return !file.getName().startsWith("._") && !file.getName().startsWith("~$") && !file.getName().startsWith(".DS");
     }
 }
