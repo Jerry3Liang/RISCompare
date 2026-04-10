@@ -5,6 +5,8 @@ import org.apache.poi.xssf.streaming.SXSSFSheet;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFFont;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -12,6 +14,9 @@ import java.util.*;
 
 public class WriteExcelMethods {
 
+    private static final Logger logger = LoggerFactory.getLogger(WriteExcelMethods.class);
+    // Excel 單一儲存格最大字數
+    private static final int EXCEL_CELL_MAX_LENGTH = 32767;
     public static Boolean exportIntegrationXlsx(
             String exportPath,
             Map<String, Integer> correctMap,
@@ -32,9 +37,9 @@ public class WriteExcelMethods {
         List<List<String>> expYearHeader = new ArrayList<>();
 
         //欄位名稱
-        correctHeader.add(Arrays.asList("報表代號", "總份數"));
-        needUpdatedHeader.add(Arrays.asList("報表代號", "總份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔", "最後需補檔日期", "有問題報表檔名", "需校正檔案部分名稱"));
-        failureHeader.add(Arrays.asList("報表代號", "總份數", "與 OnDemand 差異", "備註"));
+        correctHeader.add(Arrays.asList("報表代號", "資料夾總份數"));
+        needUpdatedHeader.add(Arrays.asList("報表代號", "資料夾總份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔日期天數", "最後需補檔日期", "需補檔檔案數量", "有問題報表檔名", "需校正檔案部分名稱"));
+        failureHeader.add(Arrays.asList("報表代號", "資料夾總份數", "與 OnDemand 差異", "備註"));
         noDownloadHeader.add(List.of("報表代號"));
         expYearHeader.add(List.of("報表代號"));
 
@@ -44,7 +49,6 @@ public class WriteExcelMethods {
                     correctHeader, needUpdatedHeader, failureHeader, noDownloadHeader, expYearHeader,
                     correctMap, needUpdatedMap, failureMap, noDownloadReportList, expYearReportIdList,
                     generateTime,
-                    "Times New Roman",
                     excelExportPartName
             );
 
@@ -67,7 +71,6 @@ public class WriteExcelMethods {
             List<String> noDownloadReportList,
             List<String> expYearReportIdList,
             String generateTime,
-            String fontName,
             String excelExportPartName
     ) throws IOException {
         SXSSFWorkbook workbook = new SXSSFWorkbook(100);
@@ -83,13 +86,13 @@ public class WriteExcelMethods {
         columnWidthMultiplier.put(2, 1.3);
         columnWidthMultiplier.put(3, 1.3);// 第 3 列用 2.5 倍
 
-        createHeaderAndStyleForExcel(correctHeader, workbook, correctSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(needUpdatedHeader, workbook, updatedSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(failureHeader, workbook, failureSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(noDownloadHeader, workbook, noDownloadSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(expYearHeader, workbook, expYearSheet, fontName, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(correctHeader, workbook, correctSheet, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(needUpdatedHeader, workbook, updatedSheet, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(failureHeader, workbook, failureSheet, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(noDownloadHeader, workbook, noDownloadSheet, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(expYearHeader, workbook, expYearSheet, columnWidthMultiplier);
 
-        CellStyle contentStyle = createContentAndStyleForExcel(workbook, fontName);
+        CellStyle contentStyle = createContentAndStyleForExcel(workbook);
 
         //將 data 寫入 Excel (Sheet : 完全正確)
         writeMapToSheet(correctSheet, correctMap, contentStyle, true);
@@ -118,7 +121,7 @@ public class WriteExcelMethods {
             Map<String, List<Object>> excel2ndExistMap,
             Map<String, List<Object>> excel2ndNotExistMap,
             String excelExportPartName
-    ) {
+    ) throws IOException {
         //產生當前時間 yyyy年MM月dd日
         String generateTime = DatetimeConverter.getSYSTime(4);
 
@@ -127,23 +130,18 @@ public class WriteExcelMethods {
         List<List<String>> notExistHeader = new ArrayList<>();
 
         //欄位名稱
-        existHeader.add(Arrays.asList("報表代號", "已存在報表份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔", "最後需補檔日期", "有問題報表檔名", "需校正檔案部分名稱"));
-        notExistHeader.add(Arrays.asList("報表代號", "所缺報表數量", "最後需補檔日期", "所缺檔案部分名稱"));
+        existHeader.add(Arrays.asList("報表代號", "已存在報表份數", "原本就正確", "需校正", "有問題報表", "校正後正確", "需補檔日期天數", "最後需補檔日期", "需補檔檔案數量", "有問題報表檔名", "需校正檔案部分名稱"));
+        notExistHeader.add(Arrays.asList("報表代號", "最後所缺報表數量 (含校正完)", "最後需補檔日期", "所缺檔案部分名稱"));
 
-        try{
-            createLackReportXlsxFile(
-                    exportPath,
-                    existHeader, notExistHeader,
-                    excel2ndExistMap, excel2ndNotExistMap,
-                    generateTime,
-                    "Times New Roman",
-                    excelExportPartName
-            );
+        createLackReportXlsxFile(
+                exportPath,
+                existHeader, notExistHeader,
+                excel2ndExistMap, excel2ndNotExistMap,
+                generateTime,
+                excelExportPartName
+        );
 
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+        return true;
     }
 
     private static void createLackReportXlsxFile(
@@ -153,7 +151,6 @@ public class WriteExcelMethods {
             Map<String, List<Object>> excel2ndExistMap,
             Map<String, List<Object>> excel2ndNotExistMap,
             String generateTime,
-            String fontName,
             String excelExportPartName
     ) throws IOException {
         SXSSFWorkbook workbook = new SXSSFWorkbook(100);
@@ -166,19 +163,19 @@ public class WriteExcelMethods {
         columnWidthMultiplier.put(2, 1.3);
         columnWidthMultiplier.put(3, 1.3);// 第 3 列用 2.5 倍
 
-        createHeaderAndStyleForExcel(existHeader, workbook, existSheet, fontName, columnWidthMultiplier);
-        createHeaderAndStyleForExcel(notExistHeader, workbook, notExistSheet, fontName, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(existHeader, workbook, existSheet, columnWidthMultiplier);
+        createHeaderAndStyleForExcel(notExistHeader, workbook, notExistSheet, columnWidthMultiplier);
 
-        CellStyle contentStyle = createContentAndStyleForExcel(workbook, fontName);
+        CellStyle contentStyle = createContentAndStyleForExcel(workbook);
 
         //將 data 寫入 Excel (Sheet : 已存在)
-        writeMapToSheet(existSheet, excel2ndExistMap, contentStyle, false);
+        writeMapToSheet(existSheet, excel2ndExistMap, contentStyle, true);
 
         //將 data 寫入 Excel (Sheet : 不存在")
-        writeMapToSheet(notExistSheet, excel2ndNotExistMap, contentStyle, false);
+        writeMapToSheet(notExistSheet, excel2ndNotExistMap, contentStyle, true);
 
         //寫出檔案
-        FileOutputStream fileOut = new FileOutputStream(exportPath + "/" + excelExportPartName + "_Lack_Report_Data_Result_" + generateTime + ".xlsx");
+        FileOutputStream fileOut = new FileOutputStream(exportPath + "/" + excelExportPartName + "_Missing_Report_Data_Result_" + generateTime + ".xlsx");
         workbook.write(fileOut);
         workbook.close();
         fileOut.close();
@@ -186,16 +183,16 @@ public class WriteExcelMethods {
 
     /**
      * 所有 Excel 表頭部分的通用樣式
-     * @param header: 表頭內容陣列
-     * @param workbook: .xlsx 的 Excel
-     * @param sheet: Excel 的內頁
-     * @param columnWidthMultiplier: 動態設定列寬的索引與倍數
+     *
+     * @param header                : 表頭內容陣列
+     * @param workbook              : .xlsx 的 Excel
+     * @param sheet                 : Excel 的內頁
+     * @param columnWidthMultiplier : 動態設定列寬的索引與倍數
      */
     private static void createHeaderAndStyleForExcel(
             List<List<String>> header,
             SXSSFWorkbook workbook,
             SXSSFSheet sheet,
-            String fontName,
             Map<Integer, Double> columnWidthMultiplier //動態設定列寬的索引與倍數
     ){
         //設定自適應列寬
@@ -207,11 +204,11 @@ public class WriteExcelMethods {
                 (byte) 255 };
 
         Font font = workbook.createFont();
-        font.setFontName(fontName);
+        font.setFontName("Times New Roman");
 
         XSSFFont headerFont = (XSSFFont) workbook.createFont();
         headerFont.setColor(new XSSFColor(rgb, null));
-        headerFont.setFontName(fontName);
+        headerFont.setFontName("Times New Roman");
         headerFont.setFontHeightInPoints((short) 14);
         headerFont.setBold(true);
 
@@ -252,17 +249,18 @@ public class WriteExcelMethods {
 
     /**
      * 所有 Excel 內容部分的通用樣式
-     * @param workbook: .xlsx 的 Excel
+     *
+     * @param workbook : .xlsx 的 Excel
      * @return : CellStyle
      */
-    private static CellStyle createContentAndStyleForExcel(SXSSFWorkbook workbook, String fontName){
+    private static CellStyle createContentAndStyleForExcel(SXSSFWorkbook workbook){
 
         CellStyle contentStyle = workbook.createCellStyle();
         contentStyle.setAlignment(HorizontalAlignment.CENTER);
         contentStyle.setVerticalAlignment(VerticalAlignment.CENTER);
 
         Font contentFont = workbook.createFont();
-        contentFont.setFontName(fontName);
+        contentFont.setFontName("Times New Roman");
         contentFont.setFontHeightInPoints((short) 12);
         contentStyle.setFont(contentFont);
 
@@ -286,11 +284,22 @@ public class WriteExcelMethods {
                 List<?> list = (List<?>) value;
                 for(int j = 0; j < list.size(); j++) {
                     createCell(row, j + 1, list.get(j), contentStyle);
+                    if(list.get(j) instanceof Set) {
+                        @SuppressWarnings("unchecked")
+                        Set<Object> set = (Set<Object>) list.get(j);
+                        String joined = set.stream()
+                                .map(String::valueOf)
+                                .reduce((a, b) -> a + ", " + b)
+                                .orElse("");
+
+                        if(isExceedExcelCellLimit(joined)) {
+                            writeSplitSafe(row, list.size() + 1, joined);
+                        }
+                    }
                 }
             } else {
                 createCell(row, 1, value, contentStyle);
             }
-
         }
     }
 
@@ -322,9 +331,14 @@ public class WriteExcelMethods {
             List<Object> list = (List<Object>) value;
             String joined = list.stream()
                     .map(String::valueOf)//確保轉成字串
-                    .reduce((a, b) -> a + ", " + b)  // 用逗號串接
+                    .reduce((a, b) -> a + ", " + b)  //用逗號串接
                     .orElse("");
-            cell.setCellValue(joined);
+
+            if(!isExceedExcelCellLimit(joined)) {
+                cell.setCellValue(joined);
+            } else {
+                cell.setCellValue("超過 Excel 一格字元上限請另外處理！");
+            }
         } else if (value instanceof Set) {
             //假設 Set 裡的元素型別不固定，全部轉字串
             @SuppressWarnings("unchecked")
@@ -333,9 +347,51 @@ public class WriteExcelMethods {
                     .map(String::valueOf)
                     .reduce((a, b) -> a + ", " + b)
                     .orElse("");
-            cell.setCellValue(joined);
+
+            if(!isExceedExcelCellLimit(joined)) {
+                cell.setCellValue(joined);
+            } else {
+                cell.setCellValue("超過 Excel 一格字元上限請另外處理！");
+            }
         }
 
         cell.setCellStyle(style);
+    }
+
+    public static boolean isExceedExcelCellLimit(String value) {
+        if (value == null) {
+            return false; //null 不算超過
+        }
+
+        return value.length() > EXCEL_CELL_MAX_LENGTH;
+    }
+
+    private static void writeSplitSafe(Row row, int startColumn, String text) {
+        int start = 0;
+
+        while (start < text.length()) {
+            int maxEnd = Math.min(start + EXCEL_CELL_MAX_LENGTH, text.length());
+            int end = maxEnd;
+
+            //如果不是最後一段，嘗試往前找逗號，避免切壞日期
+            if (end < text.length()) {
+                int lastComma = text.lastIndexOf(",", end);
+                if (lastComma >= start && lastComma < maxEnd) {
+                    end = lastComma + 1; // 包含逗號
+                }
+            }
+
+            String chunk = text.substring(start, end);
+
+            // 🚨 防呆（強制保險）
+            if (chunk.length() > EXCEL_CELL_MAX_LENGTH) {
+                chunk = chunk.substring(0, EXCEL_CELL_MAX_LENGTH);
+                logger.warn("Chunk too long : {}", chunk.length());
+            }
+
+            Cell cell = row.createCell(startColumn++);
+            cell.setCellValue(chunk.trim()); // 去掉可能多的空白或逗號
+            start = end;
+        }
     }
 }

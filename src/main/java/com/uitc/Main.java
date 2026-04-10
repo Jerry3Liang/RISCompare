@@ -9,11 +9,9 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.uitc.DateConverter.convertDates;
-import static com.uitc.ReadExcelMethods.getParamsContent;
-import static com.uitc.ReadExcelMethods.getReportCountsAndExpYearForYear;
+import static com.uitc.ReadExcelMethods.*;
 import static com.uitc.TransferMethods.*;
-import static com.uitc.WriteExcelMethods.exportIntegrationXlsx;
-import static com.uitc.WriteExcelMethods.exportLackReportXlsx;
+import static com.uitc.WriteExcelMethods.*;
 
 public class Main {
 
@@ -90,9 +88,6 @@ public class Main {
                         System.out.println("報表資料夾 : " + reportFolderName);
                         logger.info("E-1-1. 報表資料夾： {}", reportFolderName);
 
-                        //判斷是否為英文報表
-                        boolean isEnglishReport = false;
-
                         //2. 的欄位資料
                         List<Object> needUpdatedColumnList;
                         //建立全部檔案名稱日期 Set
@@ -117,9 +112,8 @@ public class Main {
                             logger.info("E-2. 報表資料夾： {} 與 OnDemand 系統上數量一樣！", reportFolderName);
                             //遍歷報表代號的資料夾裡所有檔案並將檔案名稱的日期存取到 dateSet
                             dateSet = getDateSet(reportFolderFiles, searchYear);
-                            needUpdatedColumnList = getNeedUpdatedColumnList(reportFolder, reportFolderFiles, searchYear, filesCount, dateSet, updatedFileFolderPath, reportFolderName, isEnglishReport);
+                            needUpdatedColumnList = getNeedUpdatedColumnList(reportFolder, reportFolderFiles, searchYear, filesCount, dateSet, updatedFileFolderPath, reportFolderName, true);
 
-                            System.out.println(dateSet);
                             if(dateSet.isEmpty()) {
                                 correctMap.put(reportFolderName, filesCount);
                                 logger.info("E-6. 需補檔報表日期： {}，不需補檔！", dateSet);
@@ -144,7 +138,7 @@ public class Main {
                             continue;
                         }
 
-                        if(!isEnglishReport) {
+                        if(!needUpdatedColumnList.isEmpty()) {
                             needUpdatedMap.put(reportFolderName, needUpdatedColumnList);
                         }
                     }
@@ -160,7 +154,7 @@ public class Main {
             }
         }
 
-        //根據與 2024年比較的差異值由大到小排序
+        //根據與 OnDemand 上數量比較的差異值由大到小排序
         Map<String,List<Object>> sortedByDifferentValueFailureMap =
                 failureMap
                         .entrySet()
@@ -189,7 +183,7 @@ public class Main {
         logger.info("F-1-4. 要彙整成統整 Excel 的 No Download Report List： {}", noDownloadReportList);
         logger.info("F-1-5. 要彙整成統整 Excel 的 Exp. Year Report List： {}", expYearReportIdList);
         String exportPath = paramsContent.getCompareResultExportPath();
-        String excelExportPartName = currentFolders.getName();
+        String excelExportPartName = searchYear + "-" + keys.get(0) + "~" + keys.get(keys.size()-1);
         System.out.println("資料彙整後的 Excel 存放路徑：" + exportPath);
         logger.info("F-2. 資料彙整後的 Excel 存放路徑： {}", exportPath);
         boolean integrationDataExportResult = exportIntegrationXlsx(
@@ -233,9 +227,6 @@ public class Main {
                         System.out.println("有缺報表資料夾 : " + failureReportFolderName);
                         logger.info("G-1 有缺報表資料夾： {}", failureReportFolderName);
 
-                        //判斷是否為英文報表
-                        boolean isEnglishReport = false;
-
                         //Excel 欄位資料
                         //已存在
                         List<Object> excel2ndExistData;
@@ -243,9 +234,6 @@ public class Main {
                         Set<String> dateSet;
                         //不存在
                         List<Object> excel2ndNotExistData = new ArrayList<>();
-
-                        //先填欄位1
-                        excel2ndNotExistData.add(sortedByDifferentValueFailureMap.get(failureMapKey).get(1));
 
                         //打開報表代號的資料夾並過濾掉不是 file 及隱藏檔案
                         File[] failureReportFolderFiles = failureReportFolder.listFiles(file -> file.isFile() && !file.isHidden());
@@ -256,38 +244,38 @@ public class Main {
                         int countFiles = fileNameList.size();
                         //遍歷報表代號的資料夾裡所有檔案並將檔案名稱的日期存取到 dateSet
                         dateSet = getDateSet(failureReportFolderFiles, searchYear);
-                        excel2ndExistData = getNeedUpdatedColumnList(failureReportFolder, failureReportFolderFiles, searchYear, countFiles, dateSet, updatedFileFolderPath, failureReportFolderName, isEnglishReport);
+                        excel2ndExistData = getNeedUpdatedColumnList(failureReportFolder, failureReportFolderFiles, searchYear, countFiles, dateSet, updatedFileFolderPath, failureReportFolderName, false);
 
                         System.out.println(dateSet);
                         if(dateSet.isEmpty()) {
-                            logger.info("G-2. 已存在但需補檔報表日期： {}，不需補檔！", dateSet);
+                            logger.info("G-6. 已存在但需補檔報表日期： {}，不需補檔！", dateSet);
                         } else {
-                            logger.info("G-2. 已存在但需補檔報表日期： {}", dateSet);
+                            logger.info("G-6. 已存在但需補檔報表日期： {}", dateSet);
                         }
 
-                        if(!isEnglishReport) {
+                        if(!excel2ndExistData.isEmpty()) {
                             excel2ndExistMap.put(failureReportFolderName, excel2ndExistData);
                         }
 
                         //開始處理不存在的檔案
-                        logger.info("G-3. 開始處理缺的報表數量問題");
+                        logger.info("G-7. 開始處理缺的報表數量問題");
                         //從 OnDemand 傳回來的 String
                         String onDemandString;
                         // 1. 啟動 AutoIt 腳本打開 OnDemand 搜尋有缺的報表代號
                         //先登入
-                        logger.info("G-3-1. 開始啟動 OnDemand 並登入");
+                        logger.info("G-7-1. 開始啟動 OnDemand 並登入");
                         ProcessBuilder loginPb = new ProcessBuilder(
                                 "C:\\Program Files (x86)\\AutoIt3\\AutoIt3.exe",
-                                "C:\\autoIt3Script\\autoOndemandLogin.au3"
+                                "C:\\autoIt3Script\\autoOnDemandLogin.au3"
                         );
                         loginPb.redirectErrorStream(true);
                         Process loginProc = loginPb.start();
                         loginProc.waitFor();  //等待登入完成
-                        logger.info("G-3-2. OnDemand 登入成功");
-                        logger.info("G-3-3. OnDemand 開始查詢報表");
+                        logger.info("G-7-2. OnDemand 登入成功");
+                        logger.info("G-7-3. OnDemand 開始查詢報表");
                         ProcessBuilder searchReportPb = new ProcessBuilder(
                                 "C:\\Program Files (x86)\\AutoIt3\\AutoIt3.exe",
-                                "C:\\autoIt3Script\\autoOndemandSearchReportIdMonthCounts.au3",
+                                "C:\\autoIt3Script\\autoOnDemandSearchReportIdMonthCounts.au3",
                                 failureReportFolderName,
                                 searchYear
                         );
@@ -307,12 +295,30 @@ public class Main {
                             }
 
                             process.waitFor();
-                            logger.info("G-3-4. 報表查詢成功");
+                            logger.info("G-7-4. 報表查詢成功");
+
+                            //開啟最後校正完報表資料夾
+                            File finalCorrectFolders = new File(updatedFileFolderPath);
+                            File[] failureReportFinalCorrectFolders = finalCorrectFolders.listFiles(File::isDirectory);
+                            assert failureReportFinalCorrectFolders != null;
+                            List<String> finalFileNameList = new ArrayList<>();
+                            for(File failureReportFinalCorrectFolder : failureReportFinalCorrectFolders) {
+                                if(Objects.equals(failureReportFinalCorrectFolder.getName(), failureMapKey)) {
+                                    //打開報表代號的資料夾並過濾掉不是 file 及隱藏檔案
+                                    File[] failureReportFinalCorrectFolderFiles = failureReportFinalCorrectFolder.listFiles(file -> file.isFile() && !file.isHidden());
+                                    assert failureReportFinalCorrectFolderFiles != null;
+                                    //建立最後校正完檔案名稱的 List，用於與 OnDemand 比對用
+                                    finalFileNameList = getFileNameList(failureReportFinalCorrectFolderFiles, searchYear);
+                                }
+                            }
 
                             List<String> dateList = convertDates(onDemandString);
-                            logger.info("G-3-5 開始比對缺的報表");
-                            dateList.removeAll(fileNameList);
-                            logger.info("G-3-5 缺的報表比對完成，所缺檔案： {}", dateList);
+                            logger.info("G-7-5 開始比對缺的報表");
+                            dateList.removeAll(finalFileNameList);
+                            logger.info("G-7-6 缺的報表比對完成，所缺檔案： {}", dateList);
+
+                            //填欄位1
+                            excel2ndNotExistData.add(dateList.size());
                             //最後需下載日期 (去掉開頭 "數字_" )，並照日期從小到大排序
                             Set<String> sortedDates = dateList.stream()
                                     .map(s -> s.substring(s.indexOf("_") + 1)) // 取 "_" 後面的字串
@@ -334,18 +340,24 @@ public class Main {
             logger.info("H-1-1. 要彙整成有缺報表 Excel 的 Exist Map： {}", excel2ndExistMap);
             logger.info("H-1-2. 要彙整成有缺報表 Excel 的 Not Exist Map： {}", excel2ndNotExistMap);
             logger.info("H-2. 有缺報表的 Excel 存放路徑： {}", exportPath);
-            boolean LackReportDataExportResult = exportLackReportXlsx(
-                    exportPath,
-                    excel2ndExistMap, excel2ndNotExistMap,
-                    excelExportPartName
-            );
+            boolean LackReportDataExportResult;
+            try {
+                LackReportDataExportResult = exportLackReportXlsx(
+                        exportPath,
+                        excel2ndExistMap, excel2ndNotExistMap,
+                        excelExportPartName
+                );
+            } catch (IOException e) {
+                logger.info("H-3. 執行錯誤： {}", e.toString());
+                throw new RuntimeException(e);
+            }
 
             if(LackReportDataExportResult) {
                 System.out.println("有缺報表 Excel 匯出成功");
-                logger.info("H-3. 有缺報表 Excel 匯出成功");
+                logger.info("H-4. 有缺報表 Excel 匯出成功");
             } else {
                 System.out.println("有缺報表 Excel 匯出失敗");
-                logger.info("H-3. 有缺報表 Excel 匯出失敗");
+                logger.info("H-4. 有缺報表 Excel 匯出失敗");
             }
         }
     }
