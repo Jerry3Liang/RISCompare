@@ -1,6 +1,5 @@
 {
   "keywords": ["申請日期", "印表日期", "日期", "FILE DATE", "REP DATE", "PROC DATE", "PRINT DATE", "DATE"],
-  "date_patterns": ["yyyy/MM/dd", "MM/dd/yy", "MM/dd/yyyy"],
   "pattern_by_report": {
     "PR": "dd/MM/yy",
     "OADC100AB": "dd/MM/yy"

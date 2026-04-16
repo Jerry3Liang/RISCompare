@@ -80,15 +80,28 @@ public class TransferMethods {
                     //開始讀取報表
                     try(BufferedReader br = new BufferedReader(new FileReader(reportFile))) {
                         countLine = 0;
-
+                        boolean isStarted = false;
+                        String line;
                         ConfigLoader loader = new ConfigLoader(jsonConfigPath);
                         //只讀取報表前 15行
-                        for(int i = 0; i < 15; i++) {
+                        while((line = br.readLine()) != null) {
+                            // 1️⃣ 還沒開始 → 跳過空白行
+                            if (!isStarted) {
+                                // ^ --> 行開頭   $ --> 行結尾
+                                if (line.trim().isEmpty() || line.trim().matches("^[\\w\\u4e00-\\u9fa5]+科$")) {
+                                    //空白行直接略過
+                                    continue;
+                                }
+
+                                //第一個有內容的行
+                                isStarted = true;
+                            }
+
                             countLine++;
-                            String line = br.readLine();
+
                             if(line == null) {
                                 String logMessage3 = isEArea ? "E-2-2. 檔案 {} 第 {}行之後為空，請檢查檔案" : "G-2-2. 檔案 {} 第 {}行之後為空，請檢查檔案";
-                                logger.info(logMessage3, reportFileName, i + 1);
+                                logger.info(logMessage3, reportFileName, countLine + 1);
                                 break;
                             }
                             //                        System.out.println("字串長度 ： " + line.length());
@@ -100,21 +113,24 @@ public class TransferMethods {
                             String reportContentDate = extractDatesFromFile(
                                                         line,
                                                         loader,
-                                                        reportFileName.substring(0, reportFileName.indexOf("_"))
+                                                        reportFileName.substring(0, reportFileName.indexOf("_")),
+                                                        isEArea
                             );
+
+                            String logMessage4= isEArea ? "E-2-4. 內文比對到的日期 ： {}" : "G-2-4. 內文比對到的日期 ： {}";
+                            logger.info(logMessage4, reportContentDate);
 
                             if(!reportContentDate.contains("無法辨識格式")){
                                 String fileNameDate = reportFileName.substring(reportFileName.lastIndexOf("_") + 1, reportFileName.lastIndexOf("_") + 9);
                                 System.out.println("內文日期 : " + reportContentDate);
                                 System.out.println("檔案名稱的日期 : " + fileNameDate);
-                                String logMessage4 = isEArea ? "E-2-2. 內文日期： {}" : "G-2-2. 內文日期： {}";
-                                logger.info(logMessage4, reportContentDate);
-                                String logMessage5 = isEArea ? "E-2-3. 檔案名稱的日期： {}" : "G-2-3. 檔案名稱的日期： {}";
-                                logger.info(logMessage5, fileNameDate);
+                                String logMessage5 = isEArea ? "E-2-5. 內文日期： {}" : "G-2-5. 內文日期： {}";
+                                logger.info(logMessage5, reportContentDate);
+                                String logMessage6 = isEArea ? "E-2-6. 檔案名稱的日期： {}" : "G-2-6. 檔案名稱的日期： {}";
+                                logger.info(logMessage6, fileNameDate);
 
                                 //先確認 ReportId 是否為 oldReportId
                                 String checkedReportIdName = replaceIfExists(oldReportId, newReportId, reportFolderName);
-                                System.out.println("checkedReportIdName : " + checkedReportIdName);
 
                                 //最後所有正確檔案位置
                                 File updatedReportFolder = new File(updatedFileFolderPath + "/" + reportFolderName);
@@ -127,15 +143,15 @@ public class TransferMethods {
 
                                 if(!updatedReportFolder.exists()) {
                                     if(updatedReportFolder.mkdirs()) {
-                                        String logMessage6 = isEArea ? "E-3-1. 建立報表資料夾： {}" : "G-3-1. 建立報表資料夾： {}";
-                                        logger.info(logMessage6, reportFolder);
+                                        String logMessage7 = isEArea ? "E-3-1. 建立報表資料夾： {}" : "G-3-1. 建立報表資料夾： {}";
+                                        logger.info(logMessage7, reportFolder);
                                     } else {
-                                        String logMessage7 = isEArea ? "E-3-2. 建立資料夾: {} 失敗！" : "G-3-2. 建立資料夾: {} 失敗！";
-                                        logger.info(logMessage7, updatedReportFolder);
+                                        String logMessage8 = isEArea ? "E-3-2. 建立資料夾: {} 失敗！" : "G-3-2. 建立資料夾: {} 失敗！";
+                                        logger.info(logMessage8, updatedReportFolder);
                                     }
                                 } else {
-                                    String logMessage8 = isEArea ? "E-3-3. 報表資料夾： {} 已存在！" : "G-3-3. 報表資料夾： {} 已存在！";
-                                    logger.info(logMessage8, reportFolder);
+                                    String logMessage9 = isEArea ? "E-3-3. 報表資料夾： {} 已存在！" : "G-3-3. 報表資料夾： {} 已存在！";
+                                    logger.info(logMessage9, reportFolder);
                                 }
 
                                 boolean isDateMatch = Objects.equals(reportContentDate, fileNameDate);
@@ -144,33 +160,36 @@ public class TransferMethods {
 
                                 if(!isDateMatch) {
                                     needUpdate++;
-                                    System.out.println("日期不符合!!!");
-                                    String logMessage9 = isEArea ? "E-4. 日期不符合!!!" : "G-4. 日期不符合!!!";
-                                    logger.info(logMessage9);
+                                    String logMessage10 = isEArea ? "E-4. 日期不符合!!!" : "G-4. 日期不符合!!!";
+                                    logger.info(logMessage10);
                                     needUpdateDate.add(reportFileNameDate);
                                     UpdatedDate.add(updatedPartReportNameDate);
                                 } else {
-                                    String logMessage10 = isEArea ? "E-4. 日期符合!!!" : "G-4. 日期符合!!!";
-                                    logger.info(logMessage10);
+                                    String logMessage11 = isEArea ? "E-4. 日期符合!!!" : "G-4. 日期符合!!!";
+                                    logger.info(logMessage11);
                                     originalCorrectCount++;
                                     originalCorrectDate.add(reportFileNameDate);
                                 }
 
-                                String logMessage11 = isEArea ? "E-5-1. 報表： {} 以複製到指定資料夾！" : "G-5-1. 報表： {} 以複製到指定資料夾！";
-                                String logMessage12 = isEArea ? "E-5-1. 檔名校正後報表： {} 以複製到指定資料夾！" : "G-5-1. 檔名校正後報表： {} 以複製到指定資料夾！";
+                                String logMessage12 = isEArea ? "E-5-1. 報表： {} 以複製到指定資料夾！" : "G-5-1. 報表： {} 以複製到指定資料夾！";
+                                String logMessage13 = isEArea ? "E-5-1. 檔名校正後報表： {} 以複製到指定資料夾！" : "G-5-1. 檔名校正後報表： {} 以複製到指定資料夾！";
 
-                                String logMessage = isDateMatch ? logMessage11 : logMessage12;
+                                String logMessage = isDateMatch ? logMessage12 : logMessage13;
 
                                 try {
                                     Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
                                     dateSet.remove(isDateMatch ? reportFileNameDate : updatedPartReportNameDate);
                                     logger.info(logMessage, targetPath);
                                 } catch(IOException e) {
-                                    String logMessage13 = isEArea ? "E-5-2. 複製檔案失敗：來源={}，目標={}" : "G-5-2. 複製檔案失敗：來源={}，目標={}";
-                                    logger.error(logMessage13, sourcePath, targetPath, e);
+                                    String logMessage14 = isEArea ? "E-5-2. 複製檔案失敗：來源={}，目標={}" : "G-5-2. 複製檔案失敗：來源={}，目標={}";
+                                    logger.error(logMessage14, sourcePath, targetPath, e);
                                 }
 
                                 //有找到 "日期："，不需繼續讀完 15行
+                                break;
+                            }
+
+                            if(countLine >= 15) {
                                 break;
                             }
                         }
@@ -178,18 +197,18 @@ public class TransferMethods {
                         System.out.println("報表有問題");
                     }
                 } else {
-                    String logMessage14 = isEArea ? "E-2-1. 要比對的年份： {} 與檔案名稱的年份： {}，不一致！" : "G-2-1. 要比對的年份： {} 與檔案名稱的年份： {}，不一致！";
-                    logger.info(logMessage14, searchYear, reportFileNameYear);
+                    String logMessage15 = isEArea ? "E-2-1. 要比對的年份： {} 與檔案名稱的年份： {}，不一致！" : "G-2-1. 要比對的年份： {} 與檔案名稱的年份： {}，不一致！";
+                    logger.info(logMessage15, searchYear, reportFileNameYear);
                 }
             } else {
-                String logMessage15 = isEArea ? "E-2-1. 檔案： {}，不是 .txt 檔" : "G-2-1. 檔案： {}，不是 .txt 檔";
-                logger.info(logMessage15, reportFile.getName());
+                String logMessage16 = isEArea ? "E-2-1. 檔案： {}，不是 .txt 檔" : "G-2-1. 檔案： {}，不是 .txt 檔";
+                logger.info(logMessage16, reportFile.getName());
             }
 
             if(countLine >= 15) {
                 System.out.println("讀取 " + countLine + "行後未找到關鍵字");
-                String logMessage16 = isEArea ? "E-2-1. 讀取第 1個檔案  {} 行後未找到關鍵字！" : "G-2-1. 讀取第 1個檔案  {} 行後未找到關鍵字！";
-                logger.info(logMessage16, countLine);
+                String logMessage17 = isEArea ? "E-2-1. 讀取第 1個檔案  {} 行後未找到關鍵字！" : "G-2-1. 讀取第 1個檔案  {} 行後未找到關鍵字！";
+                logger.info(logMessage17, countLine);
                 //只讀 1個檔案
                 break;
             }
@@ -217,7 +236,6 @@ public class TransferMethods {
         needUpdatedColumnList.add(sortedDates);
 
         int needReDownloadFileCounts = countMatchingDates(sortedDates, dateSetSorted);
-        System.out.println(needReDownloadFileCounts);
         needUpdatedColumnList.add(needReDownloadFileCounts);
 
         if(failureFileName.isEmpty()) {
